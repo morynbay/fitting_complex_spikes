@@ -40,7 +40,7 @@ t = tt.to_numpy().reshape(-1)
 y = new_data['value'].to_numpy().reshape(-1)
 peaks, properties = find_peaks(y, height=(0.1, 10), distance=8, prominence=0.2)   # distance - points between peaks
 prominences = peak_prominences(y, peaks)[0]
-contour_heights = y[peaks] - prominences
+contour_heights = y[peaks] - prominences  #  this is used for vertical lines
 all_peaks = pd.DataFrame(peaks)
 promi = pd.DataFrame(prominences)
 begin_promi = pd.concat([all_peaks, promi], axis=1)
@@ -170,15 +170,6 @@ tau_fit_params_0.loc[tau_fit_params_0.index[second_fit_indexes]] = tau_fit_param
 tau_and_prominence = pd.concat([tau_fit_params_0, promi_between_peaks], axis=1)
 
 
-# get the end time
-et = time.time()
-
-# get the execution time
-elapsed_time = et - st
-print('Execution time:', elapsed_time, 'seconds')
-
-print('Number of taus greater then 1:', number_tau_great_1)
-print('Number of taus greater then 1:', number_tau_great_2)
 
 
 #  --------------------- for integration areas  ------------------------
@@ -201,8 +192,19 @@ while kk <= limit_r.max():   # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 area_list = pd.DataFrame(area_table)
 
-data_tau_area_promi = pd.concat([tau_and_prominence, area_list], axis=1)
-data_tau_area_promi.columns = ['tau1', 'a1', 'b1', 'c1', 'prominence', 'area']
-
+data_tau_area_promi = pd.concat([timestamp_repeated, tau_and_prominence, area_list], axis=1)
+data_tau_area_promi.columns = ['time', 'tau1', 'a1', 'b1', 'c1', 'prominence', 'area']
 
 #  ---------------------------------------------------------------------
+
+
+# get the end time
+et = time.time()
+
+# get the execution time
+elapsed_time = et - st
+print('Execution time:', elapsed_time, 'seconds')
+
+print('Number of taus greater then 1:', number_tau_great_1)
+print('Number of taus greater then 1:', number_tau_great_2)
+
