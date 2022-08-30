@@ -7,7 +7,7 @@ import calcium
 import scipy
 from scipy.signal import find_peaks
 from scipy.optimize import curve_fit
-from scipy.signal import find_peaks, peak_prominences
+from scipy.signal import find_peaks, peak_prominences, peak_widths
 import lmfit
 from lmfit import Model
 from lmfit import Minimizer, Parameters, report_fit
@@ -40,22 +40,26 @@ t = tt.to_numpy().reshape(-1)
 y = new_data['value'].to_numpy().reshape(-1)
 peaks, properties = find_peaks(y, height=(0.1, 10), distance=8, prominence=0.2)   # distance - points between peaks
 prominences = peak_prominences(y, peaks)[0]
+width_half = peak_widths(y, peaks, rel_height=0.5)[0]
 contour_heights = y[peaks] - prominences  #  this is used for vertical lines
 all_peaks = pd.DataFrame(peaks)
 promi = pd.DataFrame(prominences)
-begin_promi = pd.concat([all_peaks, promi], axis=1)
+width = pd.DataFrame(width_half)
+begin_promi = pd.concat([all_peaks, promi, width], axis=1)
 exclude_low_promi = begin_promi[begin_promi.iloc[:, 1] > 0.1]
 sweep_excl = exclude_low_promi.iloc[:, 0]
 sweep = sweep_excl.reset_index(drop=True)
 promi_last_point = promi[:-1].reset_index(drop=True)  # remove last value to fit number of rows with 'end_range'
+width_last_point = width[:-1].reset_index(drop=True)
 begin_range = sweep[:-1].reset_index(drop=True)       # remove last value to fit number of rows with 'end_range'
 end_range = sweep[1:].reset_index(drop=True) - 5      # remove first value, and subtracted several points before peak
 between_points = end_range - begin_range
-r_range = pd.concat([begin_range, end_range, between_points, promi_last_point], axis=1)
-r_range.columns = ['begin_range', 'end_range', 'between_points', 'prominence']
+r_range = pd.concat([begin_range, end_range, between_points, promi_last_point, width_last_point], axis=1)
+r_range.columns = ['begin_range', 'end_range', 'between_points', 'prominence', 'width']
 #   we delete in r_range those rows which have lower than 4 points between peaks
 between_peaks = pd.DataFrame(r_range.drop(r_range.index[r_range['between_points'] < 4])).reset_index(drop=True)
 r = between_peaks.index.values
+
 
 hhh = new_data.iloc[::300, :]    # for plotting vertical lines separating each cell data
 vert = hhh['frameTimestamps'].index.values
@@ -91,8 +95,8 @@ params.add('decay', value=0.1, vary=True, min=0.01)
 params.add('const', value=0.1, vary=True, min=-1)
 
 tau_table = []
-# head_cols = [col for col in cal2 if 'cell_' in col]
-# param_cloud = pd.DataFrame({'a': [0.8, 1.8, 5, 3], 'b': [0.1, 1.1, 5, 3], 'c': [0.3, 1.3, 5, 3]})
+head_cols = [col for col in cal2 if 'cell_' in col]
+param_cloud = pd.DataFrame({'a': [0.8, 1.8, 5, 3], 'b': [0.1, 1.1, 5, 3], 'c': [0.3, 1.3, 5, 3]})
 fit_param_table = []
 
 iteration = 0
@@ -114,10 +118,13 @@ while iteration <= r.max():   # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     iteration += 1
 
 promi_between_peaks = between_peaks['prominence']
+width_between_peaks = between_peaks['width']
 pd_param = pd.DataFrame(fit_param_table)
 tau_list = pd.DataFrame(tau_table)
 tau_fit_params = pd.concat([tau_list, pd_param], axis=1, ignore_index=True)
 tau_fit_params.columns = ['tau1', 'a1', 'b1', 'c1']
+tau_fit_begin_range = pd.concat([between_peaks['begin_range'], tau_list, pd_param], axis=1, ignore_index=True)
+tau_fit_begin_range.columns = ['begin_range', 'tau1', 'a1', 'b1', 'c1']
 number_tau_great_1 = tau_fit_params[abs(tau_fit_params['tau1']) > 1].count()
 
 
@@ -166,8 +173,9 @@ all_taus.columns = ['tau1', 'a1', 'b1', 'c1', 'tau2', 'a2', 'b2', 'c2']
 #  ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 tau_fit_params_0 = tau_fit_params.copy()
+# tau_fit_params_0.drop('begin_range', axis=1)
 tau_fit_params_0.loc[tau_fit_params_0.index[second_fit_indexes]] = tau_fit_params_2[:]
-tau_and_prominence = pd.concat([tau_fit_params_0, promi_between_peaks], axis=1)
+tau_and_prominence = pd.concat([between_peaks['begin_range'], tau_fit_params_0, promi_between_peaks, width_between_peaks], axis=1)
 
 
 
@@ -186,14 +194,36 @@ kk = 0
 while kk <= limit_r.max():   # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!  pay attention
     x_var = t[limit_between.iat[kk, 0]:limit_between.iat[kk, 1]]
     y_var = y[limit_between.iat[kk, 0]:limit_between.iat[kk, 1]]
-    area = trapz(abs(y_var))
+    area = trapz(abs(y_var))                #  calculation of area
     area_table.append(area)
     kk += 1
 
 area_list = pd.DataFrame(area_table)
 
-data_tau_area_promi = pd.concat([timestamp_repeated, tau_and_prominence, area_list], axis=1)
-data_tau_area_promi.columns = ['time', 'tau1', 'a1', 'b1', 'c1', 'prominence', 'area']
+data_tau_area_promi = pd.concat([tau_and_prominence, area_list], axis=1)
+data_tau_area_promi.drop(['a1', 'b1', 'c1'], axis=1, inplace=True)
+data_tau_area_promi.columns = ['begin_range', 'tau1', 'prominence', 'width', 'area']
+
+#  ***************** calculation before, during, after stimulation   *****************************
+data_during = new_data.reset_index(drop=False)[(new_data['frameTimestamps'] >= round(3.10124, 3)) &    # 94-100
+                                               (new_data['frameTimestamps'] <= round(3.30152, 3))]
+data_during_stim = data_tau_area_promi[data_tau_area_promi['begin_range'].isin(data_during['index'])]
+
+
+data_before = new_data.reset_index(drop=False)[(new_data['frameTimestamps'] >= round(2.83447, 3)) &     # 86-92
+                                               (new_data['frameTimestamps'] <= round(3.03500, 3))]
+data_before_stim = data_tau_area_promi[data_tau_area_promi['begin_range'].isin(data_before['index'])]
+
+
+data_after = new_data.reset_index(drop=False)[(new_data['frameTimestamps'] >= round(3.36801, 3)) &     # 102-108
+                                               (new_data['frameTimestamps'] <= round(3.6000, 3))]
+data_after_stim = data_tau_area_promi[data_tau_area_promi['begin_range'].isin(data_after['index'])]
+
+stat_during = data_during_stim.describe()
+stat_before = data_before_stim.describe()
+stat_after = data_after_stim.describe()
+#   **********************************************************************************
+
 
 #  ---------------------------------------------------------------------
 
